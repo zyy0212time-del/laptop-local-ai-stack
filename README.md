@@ -3,48 +3,37 @@
 > How far can a consumer laptop push local AI if I optimize the whole stack
 > instead of just downloading a model?
 
-I started with a simple goal: run the strongest local AI I could tolerate
-using **every day** — not a leaderboard winner, not a server-farm demo, but a
-model stack that stays resident, answers reliably, and doesn't burn my whole
-afternoon on a single prompt.
+I set out to run the strongest local AI I could tolerate using **every day** —
+a resident stack, not a leaderboard chase. That became a full-stack project:
+runtime tuning, memory limits, a real runtime bug, an open-source patch, a
+six-model blind evaluation, and finally a deployment stack I actually kept.
 
-That goal turned into a full-stack engineering project:
-
-- hardware reality and memory limits of an 8 GB VRAM laptop
-- inference-runtime tuning (`llama.cpp`, then `FreeToken` on the same GGUF files)
-- a **~10x** decoding-speed finding from moving MoE experts to CPU
-- a real runtime bug, diagnosed and reported upstream
-- a second bug so specific it produced a submitted, tested open-source patch
-- a six-model, blind, 192-request reasoning-budget arena
-- and finally a multi-model deployment stack I actually kept
+| at a glance | |
+|---|---|
+| **machine** | RTX 5060 Laptop · 8 GB VRAM · 32 GB DDR5 |
+| **runtime discovery** | 4.15 → 43.31 t/s (same GGUF, experts on CPU) |
+| **research** | 6 models × 32 frozen questions × 2 conditions · 384 responses |
+| **final stack** | Ornith (default) · Nex (hard tasks) · Gemma (secondary) |
 
 > **The best local model turned out not to be a model at all — it was a stack.**
 
 Model weights + quantization + inference runtime + memory behavior + reasoning
-policy + evaluation harness + deployment role — together these decide the
-result, not any single checkpoint. The arena I built proved the ranking itself
-can reshuffle when you change only the reasoning policy.
+policy + evaluation harness + deployment role together decide the result — not
+any single checkpoint.
 
 ---
 
 ## 01. The Goal
 
 Not "find the strongest model". The goal was a **long-lived resident local AI**
-scored on the dimensions that actually matter for daily use:
+scored on what matters for daily use: answer quality, delivery reliability,
+reasoning behavior, latency, runtime stability, memory behavior, runtime
+compatibility, and task role.
 
-- answer quality
-- delivery reliability (does the final answer arrive at all?)
-- reasoning behavior
-- latency / speed
-- runtime stability
-- memory behavior on 8 GB VRAM + 32 GB RAM
-- compatibility with the runtime
-- task role in the final stack
-
-So "strongest" here is deliberately scoped: **the best practical stack for
-this specific laptop and this specific workflow** — the *I Could Build* and
-*on My Laptop* parts of the title are the point, not marketing. This is not a
-claim of any global or universal best.
+"Strongest" here is deliberately scoped: **the best practical stack for this
+specific laptop and this specific workflow**. The *I Could Build* and
+*on My Laptop* parts of the title are the point — this is not a claim of any
+global or universal best.
 
 ## 02. The Machine
 
@@ -68,41 +57,24 @@ that turn a 4 t/s curiosity into a 43+ t/s daily driver.
 
 ## 03. The Stack
 
-```mermaid
-flowchart TB
-    U[Applications / Agents / CLI] --> R[Task Routing]
-    R --> P[Reasoning Policy]
+![Final local AI stack](assets/stack-architecture.svg)
 
-    P --> O[Default / Resident Model]
-    P --> N[Hard-Task Model]
-    P --> G[Secondary Model]
-
-    O --> I[Inference Runtime Layer]
-    N --> I
-    G --> I
-
-    I --> Q[GGUF / Quantization / Memory]
-    Q --> H[Consumer Laptop Hardware]
-```
-
-The final deployment decision (maintainer decision, grounded in the arena
-results below):
+The final deployment (maintainer decision, grounded in the arena results
+below):
 
 | role | model | why |
 |---|---|---|
-| **Default / resident** | Ornith-1.5-35B-A3B-Abliterated (Q4_K_M) | #1 overall in the native-thinking condition (Formal D, 569.5/800); runs fast and VRAM-light (43.5 t/s, ~3.5 GB) |
-| **Hard tasks** | Nex-N2-mini (Q4_K_M) | #1 overall in the fixed-4096-reasoning-budget condition (Formal C, 746.5/800); biggest score jump (+393.5) when the budget forced completion |
+| **Default / resident** | Ornith-1.5-35B-A3B-Abliterated (Q4_K_M) | #1 overall in the native-thinking condition (Formal D, 569.5/800); fast and VRAM-light (43.5 t/s, ~3.5 GB) |
+| **Hard tasks** | Nex-N2-mini (Q4_K_M) | #1 overall under the fixed-4096-reasoning-budget condition (Formal C, 746.5/800); largest observed score jump (+393.5) |
 | **Secondary / different lineage** | Gemma4-26B-A4B (Q4_K_M) | different base lineage and multimodal projector; was the long-running production resident before the arena |
 
-*Roles above are the maintainer's deployment decision. The underlying numbers
-are measured and published in the arena (section 08).*
+*Roles are the maintainer's deployment decision; the numbers are measured and
+published in the arena (section 08).*
 
 ## 04. Why Runtime Matters
 
 The single biggest performance discovery was a **runtime configuration**, not a
-new model.
-
-On the same GPU, same llama.cpp, same `35B-A3B Q4_K_M` GGUF
+new model. On the same GPU, same llama.cpp, same `35B-A3B Q4_K_M` GGUF
 (18.23 GiB), from the archived `llama-bench` records:
 
 | configuration | tg64 decode |
@@ -124,15 +96,15 @@ torch-based inference engine, Apache-2.0, FlashML-org). On Windows + CUDA 13,
 loading a Qwen3.6-35B-A3B GGUF worked — prefill fine, API fine — but decode
 produced only **2 tokens (`"user"`) and stopped**, every time.
 
-Diagnosis (2026-08-24 → 08-26), verified by a controlled reproduction:
+Diagnosis (2026-08-24 → 08-26), verified by reproducing the failure:
 
 - root cause: the `untied lm_head` branch in the qwen3.5-moe GGUF loader
   returned logits for **all positions** during prefill, while the engine
   contract samples from the **last position** — so the first generated token
   was sampled from position 0, replaying the template.
 - fix validated locally (prefill slicing on `lm_head`), reported to
-  FlashML-org/FreeToken PR #131; the author reproduced it and confirmed the
-  diagnosis was right, fixing it upstream (`b2f8475`).
+  FlashML-org/FreeToken PR #131; the author reproduced it, confirmed the
+  diagnosis was right, and fixed it upstream (`b2f8475`).
 - a second issue (MoE CUDA grid `z` dimension capped at 65535, crashing long
   prefills) was also fixed upstream (`9952a39`).
 
@@ -140,34 +112,33 @@ That bug report is the moment "benchmarking" stopped being about scores.
 
 ## 06. When Benchmarking Turned Into Debugging
 
-FreeToken could not run **Ornith** at all: its GGUF expert-bank loader rejects
-mixed-quant checkpoints (`Q4_K`/`Q6_K` banks mixed across layers), which is
-exactly what llama.cpp's `Q4_K_M` produces. So Ornith stayed on llama.cpp
-(43.5 t/s, long-prefill healthy), and FreeToken remained a separate runtime
-path for uniform-quant models.
+The timeline matters here:
 
-While validating lucaspirola's Ornith branch
-(FlashML-org/FreeToken **PR #196**, `ornith-sm120-gguf-mmq-phase2`) on this
-exact GPU, I found the auto pageable-GPU residency planner could not size
-mixed-GGUF expert banks: `bank_bytes_estimate()` returned `None`, so split
-residency planning was silently skipped.
-
-I implemented and validated a fix — a shared `expert_bank_geometry()` helper
-plus a `"gguf"` branch in the estimator — and **submitted it as a pull request**:
+1. The earlier/main production FreeToken path **could not run the mixed-GGUF
+   Ornith artifact** — its expert-bank loader rejects mixed-quant checkpoints
+   (`Q4_K`/`Q6_K` banks across layers), exactly what llama.cpp's `Q4_K_M`
+   produces. So Ornith stayed on llama.cpp (43.5 t/s, long-prefill healthy),
+   and FreeToken remained a separate path for uniform-quant models.
+2. **lucaspirola's experimental branch** (FlashML-org/FreeToken PR #196,
+   `ornith-sm120-gguf-mmq-phase2`) added the sm_120/Ornith route — the first
+   path that could actually validate Ornith in FreeToken.
+3. Validating that branch on this exact GPU exposed a **separate** gap: the
+   auto pageable-GPU residency planner could not size mixed-GGUF expert banks
+   (`bank_bytes_estimate()` returned `None`), so split residency planning was
+   silently skipped.
+4. I implemented and validated a fix — a shared `expert_bank_geometry()`
+   helper plus a `"gguf"` branch in the estimator — and **submitted it as a
+   pull request**:
 
 > [lucaspirola/FreeToken **#1**](https://github.com/lucaspirola/FreeToken/pull/1)
 > — `fix(moe): size mixed-GGUF expert banks from GGUF metadata`
 > (state at last check: **open**, not merged)
 
-Verified against the patch:
-
-- **+163 / −17** lines across 5 files, 8 CPU/synthetic regression tests
-- Ornith Q4_K_M geometry: gate/up stride `1,179,648` B, down stride `860,160` B,
-  logical bank size `522,190,848` B/layer → `20,887,633,920` B total (40 layers),
-  estimator delta **0**
-- end-to-end on this laptop: 15 GiB pin budget → 10 pageable + 30 pinned MoE
-  layers, **60/60** host registrations, **14.589844 GiB** cumulatively
-  registered, `/health = ready`, HTTP 200
+The patch is a single commit (+163/−17 across 5 files) with 8 CPU/synthetic
+regression tests, validated by a laptop end-to-end load (60/60 host
+registrations, `/health = ready`, HTTP 200). Exact bank geometry and validation
+bytes are in [docs/FREETOKEN-OSS-STORY.md](docs/FREETOKEN-OSS-STORY.md) and
+[docs/RUNTIME-EVIDENCE.md](docs/RUNTIME-EVIDENCE.md).
 
 *I am the external validator/debugger/patch author of that stacked PR — not the
 author of PR #196. The wording above reflects the PR's actual GitHub state
@@ -176,120 +147,115 @@ author of PR #196. The wording above reflects the PR's actual GitHub state
 ## 07. Choosing the Models
 
 Six local GGUF models, all Q4_K_M, all runnable on this laptop via llama.cpp
-`b10375`:
+`b10375`. Speeds below are measured on the experts-on-CPU config (runtime-
+specific; all six passed the arena's ≥10 t/s gate):
 
-| model | file size | arch |
-|---|---|---|
-| Ornith-1.5-35B-A3B-Abliterated | 19.71 GB | qwen35moe (256 exp) |
-| Nex-N2-mini | 19.92 GB | qwen35moe (256 exp) |
-| Gemma4-26B-A4B-QAT-Uncensored-Balanced | 15.64 GB | gemma4 (128 exp) |
-| RavenX-CyberAgent-35B-v5.1 | 20.22 GB | qwen35moe (256 exp) |
-| Endy-Qwen3.6-CyberSec-35B-A3B | 20.22 GB | qwen35moe (256 exp) |
-| Qwen3.8-9B-abliterated-25 | 5.24 GB | 9B dense |
-
-Measured decoding speeds (llama.cpp b10375, experts-on-CPU config, the arena's
-speed gate was ≥10 t/s, all passed):
-
-| model | gen t/s |
-|---|---:|
-| Qwen3.8-9B-abliterated-25 | 58.2 |
-| Nex-N2-mini | 47.0 |
-| Endy-Qwen3.6-CyberSec | 45.2 |
-| RavenX-CyberAgent-35B | 44.8 |
-| Ornith-1.5-35B-A3B | 43.5 |
-| Gemma4-26B-A4B | 37.7 |
+| model | size | arch | gen t/s |
+|---|---|---|---|
+| Ornith-1.5-35B-A3B-Abliterated | 19.71 GB | qwen35moe (256) | 43.5 |
+| Nex-N2-mini | 19.92 GB | qwen35moe (256) | 47.0 |
+| Gemma4-26B-A4B-Balanced | 15.64 GB | gemma4 (128) | 37.7 |
+| RavenX-CyberAgent-35B-v5.1 | 20.22 GB | qwen35moe (256) | 44.8 |
+| Endy-Qwen3.6-CyberSec-35B-A3B | 20.22 GB | qwen35moe (256) | 45.2 |
+| Qwen3.8-9B-abliterated-25 | 5.24 GB | 9B dense | 58.2 |
 
 *Sources: model inventory + performance records (local arena workspace).*
 
 ## 08. The Reasoning Budget Arena
 
-To compare them fairly, I built a controlled-ish, blind, six-model arena:
-**32 frozen questions** (18 general + 14 cyber), **192 requests**, one
-llama.cpp server at a time, `ctx=8192`, `max_tokens=8192`, `temperature=0.1`,
-`top_p=0.9`, no system prompt, identical runtime for every model. Two
-conditions on the same question set:
+The evaluation behind this story is the published **Reasoning Budget Arena** —
+an **exploratory, closely matched** comparison, **not a strict single-variable
+controlled experiment**. Same six models, same final frozen 32-question
+benchmark (18 general + 14 cyber), closely matched target settings
+(`ctx=8192`, `max_tokens=8192`, `temperature=0.1`, `top_p=0.9`), one llama.cpp
+server at a time, no system prompt.
 
-- **Formal D** — native/default thinking, no reasoning budget
-- **Formal C** — native thinking + hard `--reasoning-budget 4096`
+- **Formal D** — native/default thinking. Its published baseline was a
+  composite: a 29-question 8192 probe plus a later G1/G8/G10 supplement.
+- **Formal C** — one complete 32-question run under a hard
+  `--reasoning-budget 4096`.
 
-Blind final-only grading: scores were locked before identities were revealed.
+The two execution histories were **not identical**. Blind final-only grading;
+scores were locked before identities were revealed.
 
-Key structural metrics (verified, published):
+**192 requests per condition** — 384 model-question responses across
+Formal D + Formal C.
+
+Structural snapshot:
 
 | | Formal D | Formal C |
 |---|---|---|
-| records | 192 | 192 |
-| non-empty final answers | 119 (61.98%) | 192 (100%) |
-| empty finals | 73 | 0 |
-| context-exhausted | 77 | 8 |
-| confirmed loops | 0 | 6 |
-| structurally clean finals | 115 | 184 (95.8%) |
+| final answers | 119/192 | 192/192 |
+| structurally clean finals | 115 | 184 |
 
-Overall blind scores (/800):
+Rank movement that matters: **Ornith #1 in Formal D** · **Nex #1 in Formal C**
+(Nex: rank 4 → 1).
 
-| model | D | C | Δ | rank D→C |
-|---|---:|---:|---:|---|
-| Ornith-1.5-35B-A3B | **569.5** | 725.5 | +156.0 | 1→2 |
-| Nex-N2-mini | 353.0 | **746.5** | **+393.5** | 4→**1** |
-| Gemma4-26B-A4B | 540.5 | 706.0 | +165.5 | 2→3 |
-| Endy-Qwen3.6-CyberSec | 526.0 | 644.0 | +118.0 | 3→4 |
-| Qwen3.8-9B-abliterated | 332.5 | 635.0 | +302.5 | 5→5 |
-| RavenX-CyberAgent-35B | 301.5 | 576.0 | +274.5 | 6→6 |
+![Overall rank movement, Formal D → Formal C](assets/arena-rank-change.png)
 
-The full evidence — methodology, scores, rankings, structural metrics, model
-fingerprints, figures, limitations, reproducibility — is the **published
-Reasoning Budget Arena** repository:
+*Source: Reasoning Budget Arena v1.0.0, project-authored CC BY 4.0.*
 
-- repo: <https://github.com/zyy0212time-del/reasoning-budget-arena>
-- v1.0.0: <https://github.com/zyy0212time-del/reasoning-budget-arena/releases/tag/v1.0.0>
-
-This project is the engineering story; the arena is the research evidence.
+Full score table, structural metrics, and the complete protocol:
+[docs/ARENA-REFERENCE.md](docs/ARENA-REFERENCE.md) and the published
+[Reasoning Budget Arena](https://github.com/zyy0212time-del/reasoning-budget-arena)
+repository. This project is the engineering story; the arena is the research
+evidence.
 
 ## 09. The Weirdest Result
 
-Changing **only** the reasoning policy reshuffled the ranking:
+Under the fixed-budget protocol, the **observed ranking looked very different**.
+(Formal D and C are closely matched exploratory conditions, not
+execution-identical runs — these are observations from this run, not an
+isolated causal proof.)
 
-- Formal C produced **0 empty final answers** where Formal D had 73.
-- Every model scored higher under the fixed budget; the largest jump was
-  Nex **+393.5**, moving it from rank 4 to rank 1.
-- But two of the next-largest jumps (Qwen 9B +302.5, RavenX +274.5) changed
-  **no** ranks — those models were also furthest behind.
-- The failure mode did not disappear; it **shifted**: 73 empty finals became
-  6 content-channel loops + 2 context-truncated answers.
+- Formal C delivered non-empty finals in **192/192** responses; Formal D had
+  **73 empty finals**.
+- Every model's observed score was higher in Formal C; the largest delta was
+  Nex **+393.5** (rank 4 → 1).
+- Two of the next-largest deltas (Qwen 9B +302.5, RavenX +274.5) did not change
+  that model's rank — both already sat furthest down the order.
+- The observed failure profile differed: Formal D had 73 empty finals;
+  Formal C had 6 confirmed content-channel loops and 2 context-truncated finals.
 
-Two takeaways shaped the final stack: (1) **no single ranking survives a
-policy change** — "Ornith is strongest" would be wrong even one experiment
-later; (2) a hard reasoning budget is a real delivery lever, and the model
-that benefits most (Nex) earns a role in the stack.
+Two takeaways shaped the final stack: no ranking here should be read as
+policy-independent, and a fixed reasoning budget is a real delivery lever on
+this hardware.
 
 ## 10. The Final Stack
 
-The deployment is a **three-model stack behind one routing layer**, on
-llama.cpp (`llama-server`), which replaced the previous single-resident
-setup (Gemma4-26B had been the system's only resident model):
+A benchmark is useful when it **changes what I deploy**. The arena did:
 
-- **Ornith** — default / resident model for everyday conversation and general
-  work (Formal D winner; fast, VRAM-light, reliable under native thinking).
-- **Nex** — routed to hard tasks where completion is critical (Formal C
-  winner under the fixed 4096 budget).
-- **Gemma4-26B** — secondary model from a different lineage (and multimodal),
-  kept for compatibility/vision roles.
+| Role | Model | Why it stayed |
+|---|---|---|
+| **Default** | Ornith | native-thinking balance · D #1 · ~43.5 t/s · ~3.5 GB VRAM |
+| **Hard tasks** | Nex | C #1 under the fixed-budget protocol |
+| **Secondary** | Gemma | alternate lineage · multimodal/fallback |
 
-Reasoning policy is part of the stack: native thinking by default, with the
-fixed-budget mode available as a delivery lever for tasks that need a final
-answer every time. (Deployment decision by the maintainer; runtime behavior
-measured and documented in the arena.)
+These sit behind one task-routing layer on llama.cpp (`llama-server`),
+replacing the previous single-resident setup (Gemma4-26B had been the
+system's only resident model). Reasoning policy is part of the stack: native
+thinking by default, with the fixed-budget mode as a delivery lever for tasks
+that need a final answer every time.
+
+**Retired from the active stack:** RavenX-CyberAgent, Endy-Qwen3.6-CyberSec,
+and Qwen3.8-9B-abliterated. They did not justify a permanent active role on
+this laptop after the evaluation — a deployment decision, not a judgement of
+their quality.
+
+The arena changed four things in practice: **default-model selection,
+hard-task routing, model retention, and storage/deployment decisions**.
 
 ## 11. What I Learned
 
-1. **On a consumer laptop, the runtime decides more than the checkpoint.**
-   ~10x from `n_cpu_moe`; 4.15 → 43.31 t/s on the same file.
-2. **Rankings are policy-dependent.** A one-line server flag reshuffled a
-   six-model leaderboard.
-3. **Delivery is a first-class metric.** "Best quality, 38% empty answers" is
-   not a daily driver; the budget condition that forced completion scored
-   highest overall.
-4. **Debugging is part of benchmarking.** The same GGUF that ran perfectly in
+1. **Runtime configuration can dominate practical throughput on constrained
+   hardware.** ~10x from moving MoE experts to CPU: 4.15 → 43.31 t/s on the
+   same file.
+2. **The observed ranking differed substantially under the fixed-budget
+   protocol.**
+3. **Delivery is a first-class metric.** The fixed-budget condition delivered
+   non-empty finals in 192/192 responses in this run, with a different failure
+   profile — "best quality, 38% empty answers" is not a daily driver.
+4. **Debugging is part of benchmarking.** The same GGUF that ran fine in
    llama.cpp broke decode in another runtime; the fix started as a bug report
    and ended as a submitted OSS patch.
 5. **"Strongest" only means something scoped to a machine and a workflow.**
@@ -304,12 +270,14 @@ figures — lives in the **Reasoning Budget Arena** repository:
 
 - <https://github.com/zyy0212time-del/reasoning-budget-arena>
 
-Key local evidence archived alongside this project:
+Technical detail archived alongside this project:
 
 - `docs/RUNTIME-EVIDENCE.md` — hardware audit, llama-bench records,
   FreeToken backend A/B numbers, model fingerprints
-- `docs/ARENA-REFERENCE.md` — the verified Formal D/C numbers and links
-- `docs/FREETOKEN-OSS-STORY.md` — the two bug stories and the PR #1 state
+- `docs/ARENA-REFERENCE.md` — full Formal D/C score table, structural metrics,
+  links
+- `docs/FREETOKEN-OSS-STORY.md` — the two bug stories and the PR #1 state,
+  including exact patch geometry
 - `docs/DEPLOYMENT-STACK.md` — ports, launcher slots, runtime configs
 
 The arena repo's `REPRODUCIBILITY.md` documents the clean-room path tests and
@@ -329,6 +297,8 @@ the exact runtime contract (llama.cpp b10375, experts-on-CPU).
 - Code in this repository: **MIT** (see `LICENSE`).
 - Documentation, diagrams, and project-authored narrative in this repository:
   **CC BY 4.0** (see `LICENSE-DOCS-DATA.md`).
+- `assets/arena-rank-change.png` is a project-authored figure from the
+  Reasoning Budget Arena v1.0.0 (CC BY 4.0); see `assets/ATTRIBUTION.md`.
 - Model weights and names belong to their upstream authors (see `NOTICE.md`);
   no model weights are distributed here. The arena's scores and data are the
   Reasoning Budget Arena's own project-authored evidence, published under its

@@ -6,7 +6,8 @@ The authoritative evidence repository is published at
 
 ## Protocol (both conditions)
 
-- 6 models × 32 frozen questions (18 general + 14 cyber) = 192 requests
+- 6 models × 32 frozen questions (18 general + 14 cyber) = 192 requests per
+  condition (384 model-question responses across Formal D + Formal C)
 - llama.cpp b10375, one server at a time
 - `ctx = 8192`, `max_tokens = 8192`, `temperature = 0.1`, `top_p = 0.9`
 - no system prompt; vanilla chat templates

@@ -21,7 +21,7 @@ hard constraint).
 - `temperature 0.1`, `top_p 0.9` (capability runs)
 - no system prompt (vanilla)
 - reasoning policy: native by default; hard `--reasoning-budget 4096` available
-  as a delivery lever (Formal C showed it eliminates empty finals)
+  as a delivery lever (Formal C observed 0 empty finals in this run)
 
 ## Port/slot map (from the launcher, snapshot 2026-08-30)
 

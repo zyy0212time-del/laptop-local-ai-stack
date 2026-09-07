@@ -106,10 +106,15 @@ Diagnosis (2026-08-24 → 08-26), verified by reproducing the failure:
   contract samples from the **last position** — so the first generated token
   was sampled from position 0, replaying the template.
 - fix validated locally (prefill slicing on `lm_head`), reported to
-  FlashML-org/FreeToken PR #131; the author reproduced it, confirmed the
-  diagnosis was right, and fixed it upstream (`b2f8475`).
+  FlashML-org/FreeToken PR #131; the PR author reproduced it, confirmed the
+  diagnosis was right, and fixed it on the #131 PR branch (`b2f8475`).
 - a second issue (MoE CUDA grid `z` dimension capped at 65535, crashing long
-  prefills) was also fixed upstream (`9952a39`).
+  prefills) was fixed on the #131 PR branch (`9952a39`), but had not entered
+  FlashML-org/FreeToken upstream `main` at the last verified check.
+
+At the last verified check (2026-09-07), PR #131 was still **open and not
+merged**: both commits live on the PR head branch
+(`vcruz305/FreeToken:feat/generic-gguf`), not on FlashML-org/FreeToken `main`.
 
 That bug report is the moment "benchmarking" stopped being about scores.
 

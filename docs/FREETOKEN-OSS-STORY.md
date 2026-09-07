@@ -2,7 +2,7 @@
 
 Two separate upstream interactions with **FreeToken** (FlashML-org, Apache-2.0).
 
-## Bug 1 — decode stopped after two tokens (reported, fixed upstream)
+## Bug 1 — decode stopped after two tokens (reported; fixed on the PR #131 branch)
 
 Observed 2026-08-24 on Windows 11 + CUDA 13 + FreeToken 0.1.1(+PR #131):
 loading a Qwen3.6-35B-A3B GGUF served fine (prefill healthy), but every
@@ -15,8 +15,11 @@ engine contract samples from the last position — so the first generated token
 was sampled from position 0. A local fix (prefill slicing on `lm_head`) was
 validated, then reported on FlashML-org/FreeToken PR #131; the author
 reproduced it, confirmed the diagnosis ("Your diagnosis is right"), and fixed
-it upstream in `b2f8475`. A second issue (MoE CUDA grid `z` 65535 cap,
-crashing long prefills) was fixed upstream in `9952a39`.
+it on the #131 PR branch in `b2f8475`. A second issue (MoE CUDA grid `z` 65535
+cap, crashing long prefills) was fixed on the same PR branch in `9952a39`.
+
+PR #131 remains **open and unmerged** at the last verified check (2026-09-07),
+so neither commit has entered FlashML-org/FreeToken upstream `main`.
 
 ## Bug 2 — mixed-GGUF expert banks can't be sized (submitted patch, PR #1)
 

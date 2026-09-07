@@ -21,6 +21,9 @@ Model weights + quantization + inference runtime + memory behavior + reasoning
 policy + evaluation harness + deployment role together decide the result — not
 any single checkpoint.
 
+A reproducible end-user deployment derived from this work is now available in
+[Local AI Deploy](https://github.com/zyy0212time-del/local-ai-deploy).
+
 ---
 
 ## 01. The Goal
@@ -286,6 +289,7 @@ the exact runtime contract (llama.cpp b10375, experts-on-CPU).
 ## 13. Related Work / Links
 
 - Reasoning Budget Arena (published evidence): <https://github.com/zyy0212time-del/reasoning-budget-arena>
+- Local AI Deploy (benchmark-driven one-command deployment derived from this stack): <https://github.com/zyy0212time-del/local-ai-deploy>
 - FlashML-org/FreeToken PR #196 (lucaspirola's Ornith branch): <https://github.com/FlashML-org/FreeToken/pull/196>
 - My patch — lucaspirola/FreeToken PR #1: <https://github.com/lucaspirola/FreeToken/pull/1>
 - FlashML-org/FreeToken PR #131 (generic-GGUF qwen35moe support; the decode
